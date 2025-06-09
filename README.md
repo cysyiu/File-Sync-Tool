@@ -28,24 +28,15 @@ File Sync Tool is a Python-based desktop application that automatically synchron
    cd file-sync-tool
    ```
 
-2. **Install Dependencies**:
-   Ensure you have Python installed, then install the required packages:
+2. **Run the Application**:
    ```bash
-   pip install watchdog pystray Pillow
-   ```
-
-3. **Prepare the Icon File**:
-   Place the `FileSync_Icon.ico` file in the same directory as `FileSync.py`. You can use the provided icon or replace it with your own `.ico` file.
-
-4. **Run the Application**:
-   ```bash
-   python FileSync.py
+   python FileSync.exe
    ```
 
 ## Usage
 
 1. **Launch the App**:
-   Run `FileSync.py` to open the GUI.
+   Run `FileSync.exe` to open the GUI.
 
 2. **Select Source Folder**:
    Click "Browse" to choose the source folder you want to monitor for changes.
@@ -64,41 +55,6 @@ File Sync Tool is a Python-based desktop application that automatically synchron
 
 7. **View Logs**:
    The log panel displays sync activities, errors, and status updates.
-
-## Building a Standalone Executable
-
-To create a portable executable (e.g., for Windows), use PyInstaller:
-
-1. **Install PyInstaller**:
-   ```bash
-   pip install pyinstaller
-   ```
-
-2. **Build the Executable**:
-   Run the following command from the project directory:
-   ```bash
-   pyinstaller --onefile --windowed --icon=FileSync_Icon.ico --add-data "FileSync_Icon.ico;." FileSync.py
-   ```
-   - On Windows, use `;` as the separator for `--add-data`.
-   - On macOS/Linux, use `:` (e.g., `--add-data "FileSync_Icon.ico:."`).
-
-3. **Find the Executable**:
-   The executable will be in the `File Sync Tool` folder (e.g., `File Sync Tool/FileSync.exe`).
-
-## Troubleshooting
-
-- **Icon Not Loading**:
-  - Ensure `FileSync_Icon.ico` is in the project directory.
-  - Verify the icon is a valid `.ico` file.
-- **Tray Icon Not Showing**:
-  - Check that `pystray` is installed (`pip install pystray`).
-  - Ensure the icon file is accessible (use the `resource_path` function for PyInstaller compatibility).
-- **Sync Not Working**:
-  - Confirm the source and destination folders are accessible and not locked.
-  - Check the log panel for error messages.
-- **PyInstaller Issues**:
-  - Ensure all dependencies are installed before building.
-  - Verify the `--add-data` path matches the icon's location.
 
 ## Contributing
 
@@ -123,7 +79,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Contact
 
-For questions or support, please open an issue on GitHub or contact [your email or preferred contact method].
+For questions or support, please open an issue on GitHub or contact cysyiu@gmail.com.
 
 ---
 
