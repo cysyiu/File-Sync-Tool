@@ -83,19 +83,7 @@ To create a portable executable (e.g., for Windows), use PyInstaller:
    - On macOS/Linux, use `:` (e.g., `--add-data "FileSync_Icon.ico:."`).
 
 3. **Find the Executable**:
-   The executable will be in the `dist` folder (e.g., `dist/FileSync.exe`).
-
-## Project Structure
-
-```
-file-sync-tool/
-│
-├── FileSync.py            # Main application script
-├── FileSync_Icon.ico      # Icon file for the app and system tray
-├── filesync_config.json   # Configuration file (generated after first use)
-├── README.md              # This README file
-└── screenshots/           # Screenshots for documentation
-```
+   The executable will be in the `File Sync Tool` folder (e.g., `File Sync Tool/FileSync.exe`).
 
 ## Troubleshooting
 
