@@ -1,4 +1,5 @@
 **File Sync Tool**
+
 **File Sync Tool** is a lightweight, automated file synchronization application built using Python, Tkinter, and Watchdog. It monitors a designated source folder and efficiently syncs changes to multiple destination folders in real time. The tool features a system tray integration for background operation and auto-start functionality when Windows boots.
 
 **Features**
