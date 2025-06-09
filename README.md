@@ -32,6 +32,7 @@ pyinstaller --onefile --windowed --icon="FileSync_Icon.ico" FileSync.py
 Ensure FileSync_Icon.ico is in the same directory.
 
 **Dependencies**
+
 - Python 3.x
 - tkinter
 - watchdog
@@ -39,4 +40,5 @@ Ensure FileSync_Icon.ico is in the same directory.
 - PIL (Pillow)
 
 **License**
+
 This project is licensed under MIT License.
