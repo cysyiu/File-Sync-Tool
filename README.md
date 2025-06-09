@@ -11,23 +11,24 @@
 - Dynamic Folder Management: Easily add or remove destination folders with a "-" button.
 
 **Installation**
-Clone the repository:
 
-bash
+1. Clone the repository:
+
+2. bash
 git clone https://github.com/cysyiu/FileSyncTool.git
 cd FileSyncTool
 Install dependencies:
 
-bash
+3. bash
 pip install -r requirements.txt
 Run the application:
 
-bash
+4. bash
 python FileSync.py
 Packaging with PyInstaller
 To create an executable with your custom icon:
 
-bash
+5. bash
 pyinstaller --onefile --windowed --icon="FileSync_Icon.ico" FileSync.py
 Ensure FileSync_Icon.ico is in the same directory.
 
