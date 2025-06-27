@@ -11,8 +11,8 @@ from watchdog.events import FileSystemEventHandler
 import pystray
 from pystray import MenuItem as item
 from PIL import Image, ImageDraw, ImageTk
-import socket
 import atexit
+import psutil
 
 def resource_path(relative_path):
     """Get the absolute path to a resource, works for development and PyInstaller."""
@@ -24,33 +24,18 @@ def resource_path(relative_path):
 # Single Instance Check
 # ----------------------------
 LOCK_FILE = "filesync_lock.pid"
-SOCKET_PORT = 65432  # Arbitrary port for communication
-SOCKET_HOST = "127.0.0.1"
 
 def is_instance_running():
-    """Check if another instance is running by checking the lock file and socket."""
+    """Check if another instance is running by checking the lock file and process."""
     if os.path.exists(LOCK_FILE):
         try:
             with open(LOCK_FILE, "r") as f:
-                pid = f.read().strip()
-                # Check if the process is still running
-                if pid and os.path.exists(f"/proc/{pid}") or (sys.platform == "win32" and pid):
-                    # Try to connect to the socket
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        try:
-                            s.connect((SOCKET_HOST, SOCKET_PORT))
-                            s.sendall(b"RESTORE")  # Send restore command
-                            return True
-                        except socket.error:
-                            # Socket not responding, assume instance is dead
-                            os.remove(LOCK_FILE)
-                            return False
-                else:
-                    os.remove(LOCK_FILE)
-                    return False
-        except Exception:
-            os.remove(LOCK_FILE)
-            return False
+                pid = int(f.read().strip())
+            if psutil.pid_exists(pid):
+                return True
+            os.remove(LOCK_FILE)  # Clean up stale lock file
+        except (ValueError, psutil.Error):
+            os.remove(LOCK_FILE)  # Clean up invalid lock file
     return False
 
 def create_lock_file():
@@ -69,11 +54,12 @@ def remove_lock_file():
 # ----------------------------
 CONFIG_FILE = "filesync_config.json"
 
-def save_config(source, destinations):
+def save_config(source, destinations, delay):
     """Save configuration to a JSON file."""
     config = {
         "source": source,
-        "destinations": destinations
+        "destinations": destinations,
+        "delay": delay
     }
     try:
         with open(CONFIG_FILE, "w") as f:
@@ -88,29 +74,36 @@ def load_config():
         try:
             with open(CONFIG_FILE, "r") as f:
                 config = json.load(f)
-            return config.get("source", ""), config.get("destinations", [])
+            return config.get("source", ""), config.get("destinations", []), config.get("delay", 1.0)
         except Exception as e:
             print(f"Error loading configuration: {e}")
-    return "", []
+    return "", [], 1.0
 
 # ----------------------------
 # Debounced File System Handler
 # ----------------------------
 class DebounceHandler(FileSystemEventHandler):
-    def __init__(self, callback, debounce_interval=0.5):
+    def __init__(self, callback, delay=1.0):
         super().__init__()
         self.callback = callback
-        self.debounce_interval = debounce_interval
+        self.delay = delay
         self.event_timer = None
+        self.last_event_time = 0
+        self.lock = threading.Lock()
 
     def on_any_event(self, event):
-        if self.event_timer:
-            self.event_timer.cancel()
-        self.event_timer = threading.Timer(self.debounce_interval, self.trigger_callback)
-        self.event_timer.start()
+        with self.lock:
+            current_time = time.time()
+            # Only start a new timer if none is active or the previous delay has completed
+            if self.event_timer is None or not self.event_timer.is_alive():
+                self.last_event_time = current_time
+                self.event_timer = threading.Timer(self.delay, self.trigger_callback)
+                self.event_timer.start()
 
     def trigger_callback(self):
-        self.callback()
+        with self.lock:
+            self.callback()
+            self.event_timer = None  # Reset timer after callback
 
 # ----------------------------
 # Synchronization Logic
@@ -157,45 +150,29 @@ class App(tk.Tk):
         except Exception as e:
             print(f"Error loading icon for window: {e}")
 
-        self.source_dir, self.dest_dirs = load_config()
+        self.source_dir, self.dest_dirs, self.delay = load_config()
         self.observer = None
         self.tray_icon = None
-        self.socket_server = None
-
-        # Start socket server for receiving restore commands
-        self.start_socket_server()
+        self.ui_initialized = False
 
         self.create_widgets()
         if self.source_dir:
             self.source_entry.delete(0, tk.END)
             self.source_entry.insert(0, self.source_dir)
         self.refresh_destinations()
+        self.delay_spinbox.delete(0, tk.END)
+        self.delay_spinbox.insert(0, str(self.delay))
         
         self.bind("<Unmap>", self.on_minimize)
+        self.bind("<Map>", self.on_map)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    def start_socket_server(self):
-        """Start a socket server to listen for restore commands."""
-        def handle_client(client_socket):
-            data = client_socket.recv(1024).decode()
-            if data == "RESTORE":
-                self.after(0, self.restore_window)
-            client_socket.close()
-
-        def server_thread():
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                self.socket_server = s
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try:
-                    s.bind((SOCKET_HOST, SOCKET_PORT))
-                    s.listen(1)
-                    while True:
-                        client_socket, _ = s.accept()
-                        threading.Thread(target=handle_client, args=(client_socket,), daemon=True).start()
-                except socket.error:
-                    pass  # Socket closed or error occurred
-
-        threading.Thread(target=server_thread, daemon=True).start()
+    def on_map(self, event):
+        """Called when the window is mapped (visible). Start watching if needed."""
+        if not self.ui_initialized:
+            self.ui_initialized = True
+            if self.source_dir and self.dest_dirs:
+                self.start_watching()
 
     def create_widgets(self):
         padding = {"padx": 5, "pady": 5}
@@ -219,12 +196,51 @@ class App(tk.Tk):
         self.start_button.pack(side=tk.LEFT, **padding)
         self.stop_button = tk.Button(controls_frame, text="Stop Watching", command=self.stop_watching, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, **padding)
+        # Add spacer to push delay Spinbox to the right
+        tk.Label(controls_frame, text="").pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        tk.Label(controls_frame, text="Delay (s):").pack(side=tk.RIGHT, **padding)
+        self.delay_spinbox = tk.Spinbox(
+            controls_frame,
+            from_=0.1,
+            to=300.0,  # Increased max delay to support up to 5 minutes
+            increment=0.1,
+            width=5,
+            command=self.update_delay
+        )
+        self.delay_spinbox.pack(side=tk.RIGHT, **padding)
+        # Bind Return key to update delay when typing
+        self.delay_spinbox.bind("<Return>", lambda event: self.update_delay())
 
         log_frame = tk.Frame(self)
         log_frame.pack(fill=tk.BOTH, expand=True, **padding)
         tk.Label(log_frame, text="Log:").pack(anchor=tk.W)
         self.log_listbox = tk.Listbox(log_frame, height=15)
         self.log_listbox.pack(fill=tk.BOTH, expand=True, **padding)
+
+    def log(self, message):
+        """Log a message to the listbox, with fallback to console if UI not ready."""
+        try:
+            timestamp = time.strftime('%H:%M:%S')
+            self.log_listbox.insert(tk.END, f"{timestamp} - {message}")
+            self.log_listbox.yview(tk.END)
+        except AttributeError:
+            print(f"Log (UI not ready): {message}")
+
+    def update_delay(self):
+        """Update the delay value from the Spinbox and save to config."""
+        try:
+            new_delay = float(self.delay_spinbox.get())
+            if new_delay < 0.1:
+                new_delay = 0.1
+                self.delay_spinbox.delete(0, tk.END)
+                self.delay_spinbox.insert(0, str(new_delay))
+            self.delay = new_delay
+            save_config(self.source_dir, self.dest_dirs, self.delay)
+            self.log(f"Delay updated to {self.delay} seconds")
+        except ValueError:
+            self.log("Invalid delay value entered; reverting to previous value")
+            self.delay_spinbox.delete(0, tk.END)
+            self.delay_spinbox.insert(0, str(self.delay))
 
     def refresh_destinations(self):
         for widget in self.destinations_container.winfo_children():
@@ -242,14 +258,9 @@ class App(tk.Tk):
             dest = self.dest_dirs.pop(index)
             self.log(f"Removed destination folder: {dest}")
             self.refresh_destinations()
-            save_config(self.source_dir, self.dest_dirs)
+            save_config(self.source_dir, self.dest_dirs, self.delay)
         except Exception as e:
             self.log(f"Error removing destination: {e}")
-
-    def log(self, message):
-        timestamp = time.strftime('%H:%M:%S')
-        self.log_listbox.insert(tk.END, f"{timestamp} - {message}")
-        self.log_listbox.yview(tk.END)
 
     def browse_source(self):
         path = filedialog.askdirectory(title="Select Source Folder")
@@ -258,7 +269,7 @@ class App(tk.Tk):
             self.source_entry.delete(0, tk.END)
             self.source_entry.insert(0, path)
             self.log(f"Selected source folder: {path}")
-            save_config(self.source_dir, self.dest_dirs)
+            save_config(self.source_dir, self.dest_dirs, self.delay)
 
     def add_destination(self):
         path = filedialog.askdirectory(title="Select Destination Folder")
@@ -267,11 +278,14 @@ class App(tk.Tk):
                 self.dest_dirs.append(path)
                 self.log(f"Added destination folder: {path}")
                 self.refresh_destinations()
-                save_config(self.source_dir, self.dest_dirs)
+                save_config(self.source_dir, self.dest_dirs, self.delay)
             else:
                 messagebox.showinfo("Duplicate", "Destination already added.")
 
     def start_watching(self):
+        if not self.ui_initialized:
+            self.after(1000, self.start_watching)  # Retry after 1 second
+            return
         if not self.source_dir:
             messagebox.showerror("Error", "Please select a source folder.")
             return
@@ -279,7 +293,10 @@ class App(tk.Tk):
             messagebox.showerror("Error", "Please add at least one destination folder.")
             return
         self.log("Starting file system watcher...")
-        event_handler = DebounceHandler(callback=self.debounced_sync, debounce_interval=0.5)
+        event_handler = DebounceHandler(
+            callback=self.debounced_sync,
+            delay=self.delay
+        )
         self.observer = Observer()
         self.observer.schedule(event_handler, path=self.source_dir, recursive=True)
         self.observer.start()
@@ -342,17 +359,13 @@ class App(tk.Tk):
             self.observer.join()
         if self.tray_icon:
             self.tray_icon.stop()
-        if self.socket_server:
-            self.socket_server.close()
         remove_lock_file()
         self.destroy()
 
 if __name__ == "__main__":
     if is_instance_running():
-        print("Another instance is already running. Restoring the existing window.")
+        print("Another instance is already running.")
         sys.exit(0)
     create_lock_file()
     app = App()
-    if app.source_dir and app.dest_dirs:
-        app.start_watching()
     app.mainloop()
